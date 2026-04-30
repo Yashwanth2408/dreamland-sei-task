@@ -10,8 +10,8 @@ This implementation demonstrates production-grade financial backend design: idem
 
 ---
 
-![Operator Console](demo/operator.png)
-![Owner Console](demo/owner.png)
+![Operator Console](demo/operator-dashboard.svg)
+![Owner Console](demo/owner-dashboard.svg)
 
 ## Table of Contents
 
@@ -77,6 +77,7 @@ PostgreSQL Database
     +-- token_ledger         (all token wins and conversions)
     +-- usd_ledger           (all USD conversions and fees)
     +-- conversion_jobs      (hourly job tracking)
+    +-- conversion_job_batches (per-user batch results)
     +-- idempotency_keys     (request deduplication)
     |
     v
@@ -525,9 +526,7 @@ The conversion job runs at minute 0 of every hour via APScheduler's CronTrigger.
 
 ### Concurrency Protection
 
-- **Two requests racing for the last token**: Both read `tokens_today = 4`, both pass cap check, both succeed → **6 tokens earned (BUG)**
-  - Solution: Use `SELECT ... FOR UPDATE` on user's token wallet account row, or PostgreSQL advisory locks
-  - Current implementation: Idempotency key UNIQUE constraint prevents duplicate ledger entries, but does NOT prevent race condition on cap check
+- **Two requests racing for the last token**: Token wallet row is locked with `SELECT ... FOR UPDATE` to serialize cap checks.
 
 ### Timezone Handling
 
@@ -557,7 +556,7 @@ The conversion job runs at minute 0 of every hour via APScheduler's CronTrigger.
 
 ## 8. Testing
 
-The test suite contains **24 async integration tests** running against a real PostgreSQL test database (`dreamland_test`). There are **no mocks** for the database layer — every test exercises the full stack from HTTP request to database write and read.
+The test suite contains **25 async integration tests** running against a real PostgreSQL test database (`dreamland_test`). There are **no mocks** for the database layer — every test exercises the full stack from HTTP request to database write and read.
 
 ### Test Architecture
 
@@ -646,6 +645,14 @@ DREAM_TOKEN_RATE_USD=0.15
 DREAM_TOKEN_DAILY_CAP=5
 ENVIRONMENT=development
 AWS_REGION=us-east-1
+
+#IF LIVE PRICING IS REQUIRED
+#RATE_PROVIDER_URL=https://your-rate-api.example.com
+#RATE_PROVIDER_TIMEOUT_SECONDS=5
+
+#MULTI-REGION- IF MULTIPLE DBS ARE DEPLOYED
+#MULTI_REGION_ENABLED=true
+#DATABASE_URLS_BY_REGION={"apac":"postgresql+asyncpg://.../dreamland_apac","eu":"postgresql+asyncpg://.../dreamland_eu"}
 ```
 
 ### Step 4: Start PostgreSQL
@@ -744,6 +751,10 @@ APScheduler (or Celery Beat)
 2. **Next**: Replace with Celery Beat for distributed scheduling
 3. **Analytics**: Debezium → Kafka → Snowflake for centralized financial reporting
 
+**Multi-Region Routing (Optional):**
+- Set `MULTI_REGION_ENABLED=true` and provide `DATABASE_URLS_BY_REGION` JSON
+- Send `X-Region` header on requests to route to region-specific DB
+
 ---
 
 ## 11. Key Design Decisions
@@ -777,7 +788,8 @@ dreamland/
 │   │   ├── users.py               User table
 │   │   ├── accounts.py            Chart of Accounts
 │   │   ├── ledger.py              Token & USD ledgers
-│   │   └── conversion_jobs.py     Hourly job tracking
+│   │   ├── conversion_jobs.py     Hourly job tracking
+│   │   └── conversion_job_batches.py Per-user batch results
 │   ├── schemas/
 │   │   ├── tokens.py              Request/response models
 │   │   ├── usd.py                 USD history response
@@ -789,7 +801,8 @@ dreamland/
 │   │   ├── usd_service.py         USD history logic
 │   │   ├── stats_service.py       Stats aggregation
 │   │   ├── account_service.py     Account management
-│   │   └── admin_service.py       Owner overview + users
+│   │   ├── admin_service.py       Owner overview + users
+│   │   └── rate_service.py        Rate provider integration
 │   ├── api/
 │   │   ├── tokens.py              Token endpoints
 │   │   ├── usd.py                 USD endpoints
