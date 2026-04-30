@@ -6,13 +6,17 @@ WHAT IT DOES (runs at top of every hour):
   2. Claims the job using INSERT ... ON CONFLICT (distributed mutex via DB)
   3. Finds all token_ledger DEBIT entries with is_converted=False in that hour
   4. Groups them by user wallet
-  5. For each user, writes 4 ledger rows (2 pairs):
+  5. For each user, writes 6 ledger rows (3 pairs):
 
-     Pair A — USD conversion:
-       DEBIT   CONVERSION_POOL   +gross_usd   (USD leaves pool)
-       CREDIT  USER_USD_WALLET   -gross_usd   (user receives USD)
+     Pair A — Token Burn:
+       CREDIT  USER_TOKEN_WALLET  -tokens      (user loses tokens)
+       DEBIT   TOKEN_ISSUANCE     +tokens      (system liability reduced)
 
-     Pair B — Fee (Dreamland pays, NOT the user):
+     Pair B — USD conversion:
+       DEBIT   CONVERSION_POOL    +gross_usd   (USD leaves pool)
+       CREDIT  USER_USD_WALLET    -gross_usd   (user receives USD)
+
+     Pair C — Fee (Dreamland pays, NOT the user):
        DEBIT   DREAMLAND_FEE_EXP  +fee_usd
        CREDIT  FEE_PAYABLE        -fee_usd
 
