@@ -43,6 +43,7 @@ async def get_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
         select(func.coalesce(func.sum(UsdLedgerEntry.amount), Decimal("0")))
         .where(
             UsdLedgerEntry.account_id == usd_wallet.id,
+            UsdLedgerEntry.entry_type == EntryType.DEBIT,
         )
     )
     usd_balance = usd_result.scalar() or Decimal("0")

@@ -62,6 +62,9 @@ FastAPI Application (async request handlers)
     +-- /api/v1/tokens/history   (GET)    → Today's token wins
     +-- /api/v1/usd/history      (GET)    → Prior USD conversions
     +-- /api/v1/stats            (GET)    → Aggregated summary
+    +-- /api/v1/admin/overview   (GET)    → Owner overview metrics
+    +-- /api/v1/admin/users      (GET)    → Owner user list + search
+    +-- /api/v1/dev/seed-user    (POST)   → Dev-only user creation
     |
     v
 PostgreSQL Database
@@ -677,6 +680,26 @@ uvicorn app.main:app --reload --port 8000
 - **Prometheus metrics**: http://localhost:8000/metrics
 - **Health check**: http://localhost:8000/health
 
+### Frontend (Operator / Owner Console)
+
+The frontend lives in the `frontend/` folder and provides:
+- Operator console (token wins, stats, history)
+- Owner console (overview metrics, user search)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Default frontend URL: http://localhost:5173
+
+### CORS (Local Dev)
+
+The API allows the Vite dev server origins:
+- http://localhost:5173
+- http://127.0.0.1:5173
+
 ---
 
 ## 10. Infrastructure & Deployment
@@ -755,20 +778,30 @@ dreamland/
 │   ├── schemas/
 │   │   ├── tokens.py              Request/response models
 │   │   ├── usd.py                 USD history response
-│   │   └── stats.py               Stats response
+│   │   ├── stats.py               Stats response
+│   │   ├── admin.py               Owner schemas
+│   │   └── dev.py                 Dev schemas
 │   ├── services/
 │   │   ├── token_service.py       Token win logic
 │   │   ├── usd_service.py         USD history logic
 │   │   ├── stats_service.py       Stats aggregation
-│   │   └── account_service.py     Account management
+│   │   ├── account_service.py     Account management
+│   │   └── admin_service.py       Owner overview + users
 │   ├── api/
 │   │   ├── tokens.py              Token endpoints
 │   │   ├── usd.py                 USD endpoints
-│   │   └── stats.py               Stats endpoint
+│   │   ├── stats.py               Stats endpoint
+│   │   ├── admin.py               Owner endpoints
+│   │   └── dev.py                 Dev-only endpoints
 │   ├── jobs/
 │   │   └── conversion_job.py      Hourly conversion job
 │   └── utils/
 │       └── time_utils.py          Timezone utilities
+├── frontend/                      Operator + Owner UI
+│   ├── src/
+│   │   ├── App.jsx                UI layout and views
+│   │   ├── styles.css             UI theme and layout
+│   │   └── lib/api.js             API helper
 ├── alembic/                       Database migrations
 ├── tests/
 │   ├── conftest.py                Test fixtures
