@@ -53,11 +53,13 @@ from app.core.logging import logger
 from app.db.engine import AsyncSessionLocal
 from app.models.accounts import Account, AccountCode
 from app.models.conversion_jobs import ConversionJob, JobStatus
+from app.models.conversion_job_batches import ConversionJobBatch, BatchStatus
 from app.models.ledger import TokenLedgerEntry, UsdLedgerEntry, EntryType
 from app.services.account_service import (
     get_or_create_system_account,
     get_or_create_user_account,
 )
+from app.services.rate_service import fetch_token_rate_usd
 from app.utils.time_utils import floor_to_hour
 
 # APScheduler instance — started in app lifespan
@@ -90,6 +92,7 @@ async def run_conversion_job() -> None:
     logger.info("conversion_job.begin", target_hour=target_hour.isoformat())
 
     async with AsyncSessionLocal() as db:
+        rate_usd, rate_source, rate_error, rate_fetched_at = await fetch_token_rate_usd()
         # ── Claim the job (idempotent upsert)
         # Only claim if status is not COMPLETED
         stmt = (
@@ -98,7 +101,10 @@ async def run_conversion_job() -> None:
                 id             = uuid.uuid4(),
                 hour_bucket    = target_hour,
                 status         = JobStatus.RUNNING,
-                token_rate_usd = settings.DREAM_TOKEN_RATE_USD,
+                token_rate_usd = rate_usd,
+                rate_source    = rate_source,
+                rate_error     = rate_error,
+                rate_fetched_at = rate_fetched_at,
                 started_at     = now,
             )
             .on_conflict_do_update(
@@ -106,6 +112,10 @@ async def run_conversion_job() -> None:
                 set_={
                     "status":     JobStatus.RUNNING,
                     "started_at": now,
+                    "token_rate_usd": rate_usd,
+                    "rate_source": rate_source,
+                    "rate_error": rate_error,
+                    "rate_fetched_at": rate_fetched_at,
                 },
                 where=(ConversionJob.status.in_([
                     JobStatus.PENDING,
@@ -146,10 +156,16 @@ async def run_conversion_job() -> None:
                 await _mark_completed(db, job_id, 0, Decimal("0"), Decimal("0"))
                 return
 
-            # Group entries by user wallet account 
+            # Group entries by user wallet account
             by_account: dict[uuid.UUID, list[TokenLedgerEntry]] = defaultdict(list)
             for entry in token_entries:
                 by_account[entry.account_id].append(entry)
+
+            account_rows = await db.execute(
+                select(Account.id, Account.user_id)
+                .where(Account.id.in_(by_account.keys()))
+            )
+            account_map = {row[0]: row[1] for row in account_rows.all()}
 
             # Pre-fetch system accounts (once per job)
             conversion_pool = await get_or_create_system_account(db, AccountCode.CONVERSION_POOL)
@@ -163,14 +179,35 @@ async def run_conversion_job() -> None:
 
             #  Process each user's batch independently
             for token_account_id, acct_entries in by_account.items():
+                tokens_total = sum(e.amount for e in acct_entries)
+                user_id = account_map.get(token_account_id)
                 try:
                     gross, fee = await _convert_user_batch(
-                        db, job_id, token_account_id, acct_entries,
-                        conversion_pool, fee_payable, fee_expense, token_issuance
+                        db,
+                        job_id,
+                        token_account_id,
+                        acct_entries,
+                        conversion_pool,
+                        fee_payable,
+                        fee_expense,
+                        token_issuance,
+                        rate_usd,
                     )
                     total_usd       += gross
                     total_fee       += fee
                     total_processed += len(acct_entries)
+
+                    db.add(ConversionJobBatch(
+                        id=uuid.uuid4(),
+                        job_id=job_id,
+                        user_id=user_id,
+                        token_account_id=token_account_id,
+                        status=BatchStatus.COMPLETED,
+                        tokens_total=tokens_total,
+                        usd_total=gross,
+                        fee_total=fee,
+                        completed_at=datetime.now(timezone.utc),
+                    ))
 
                 except Exception as exc:
                     # One user's failure is isolated — other users are unaffected
@@ -179,6 +216,16 @@ async def run_conversion_job() -> None:
                         account_id=str(token_account_id),
                         error=str(exc),
                     )
+                    db.add(ConversionJobBatch(
+                        id=uuid.uuid4(),
+                        job_id=job_id,
+                        user_id=user_id,
+                        token_account_id=token_account_id,
+                        status=BatchStatus.FAILED,
+                        tokens_total=tokens_total,
+                        error_message=str(exc)[:500],
+                        completed_at=datetime.now(timezone.utc),
+                    ))
 
             await _mark_completed(db, job_id, total_processed, total_usd, total_fee)
             logger.info(
@@ -211,6 +258,7 @@ async def _convert_user_batch(
     fee_payable,
     fee_expense,
     token_issuance,
+    token_rate_usd: Decimal,
 ) -> tuple[Decimal, Decimal]:
     """
     Convert one user's token batch to USD.
@@ -218,7 +266,7 @@ async def _convert_user_batch(
     Returns (gross_usd, fee_usd).
     """
     total_tokens = sum(e.amount for e in entries)
-    gross_usd = (total_tokens * settings.DREAM_TOKEN_RATE_USD).quantize(
+    gross_usd = (total_tokens * token_rate_usd).quantize(
         Decimal("0.00000001")
     )
     fee_usd = (gross_usd * settings.CONVERSION_FEE_RATE).quantize(
@@ -274,7 +322,7 @@ async def _convert_user_batch(
         amount                      = -gross_usd,         # negative (USD leaves pool)
         description                 = (
             f"Token→USD: {total_tokens} DREAM "
-            f"@ ${settings.DREAM_TOKEN_RATE_USD}/token"
+            f"@ ${token_rate_usd}/token"
         ),
         source_token_transaction_id = entries[0].transaction_id,
         conversion_job_id           = job_id,

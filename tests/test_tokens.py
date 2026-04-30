@@ -14,6 +14,7 @@ strip a NOT NULL timestamp server_default without replacing it, inserts fail
 with NOT NULL constraint errors.
 """
 import uuid
+import asyncio
 from decimal import Decimal
 from datetime import datetime, timezone
 
@@ -31,9 +32,18 @@ from app.models.users import User
 from app.models.accounts import Account
 from app.models.ledger import TokenLedgerEntry, UsdLedgerEntry, IdempotencyKey
 from app.models.conversion_jobs import ConversionJob
+from app.models.conversion_job_batches import ConversionJobBatch
 
 
-ALL_MODELS = [User, Account, TokenLedgerEntry, UsdLedgerEntry, IdempotencyKey, ConversionJob]
+ALL_MODELS = [
+    User,
+    Account,
+    TokenLedgerEntry,
+    UsdLedgerEntry,
+    IdempotencyKey,
+    ConversionJob,
+    ConversionJobBatch,
+]
 
 
 def utcnow():
@@ -361,6 +371,38 @@ class TestWinTokens:
             },
         )
         assert r.status_code == 422, r.text
+
+    @pytest.mark.asyncio
+    async def test_concurrent_wins_respect_daily_cap(self, client, test_user, db_session):
+        bind = db_session.get_bind()
+        if bind is not None and bind.dialect.name == "sqlite":
+            pytest.xfail("SQLite does not enforce row-level locks")
+
+        won_at = utcnow().isoformat()
+        payload_a = {
+            **win_payload(test_user.id, amount="3"),
+            "won_at": won_at,
+            "idempotency_key": f"lock-a-{uuid.uuid4().hex}",
+        }
+        payload_b = {
+            **win_payload(test_user.id, amount="3"),
+            "won_at": won_at,
+            "idempotency_key": f"lock-b-{uuid.uuid4().hex}",
+        }
+
+        res_a, res_b = await asyncio.gather(
+            client.post("/api/v1/tokens/win", json=payload_a),
+            client.post("/api/v1/tokens/win", json=payload_b),
+        )
+
+        statuses = {res_a.status_code, res_b.status_code}
+        assert statuses.issubset({201, 422}), (res_a.text, res_b.text)
+        assert 201 in statuses, (res_a.text, res_b.text)
+
+        stats = await client.get(f"/api/v1/stats?user_id={test_user.id}")
+        assert stats.status_code == 200, stats.text
+        tokens_today = Decimal(str(stats.json()["tokens_won_today"]))
+        assert tokens_today <= Decimal("5")
 
 
 class TestTokenHistory:

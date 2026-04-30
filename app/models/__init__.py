@@ -8,6 +8,7 @@ from app.models.ledger import (
     EntryType,
 )
 from app.models.conversion_jobs import ConversionJob, JobStatus
+from app.models.conversion_job_batches import ConversionJobBatch, BatchStatus
 
 __all__ = [
     "Base",
@@ -15,4 +16,5 @@ __all__ = [
     "Account", "AccountType", "AccountCode",
     "TokenLedgerEntry", "UsdLedgerEntry", "IdempotencyKey", "EntryType",
     "ConversionJob", "JobStatus",
+    "ConversionJobBatch", "BatchStatus",
 ]

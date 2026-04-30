@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     MAX_TOKENS_PER_DAY: int = 5
     CONVERSION_FEE_RATE: Decimal = Decimal("0.02")
 
+    # Rate provider (optional)
+    RATE_PROVIDER_URL: str = ""
+    RATE_PROVIDER_TIMEOUT_SECONDS: int = 5
+
+    # Multi-region (optional)
+    MULTI_REGION_ENABLED: bool = False
+    DATABASE_URLS_BY_REGION: str = ""
+
     AWS_REGION: str = "ap-south-1"
     SENTRY_DSN: str = ""
 
