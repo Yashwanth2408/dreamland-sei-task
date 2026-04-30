@@ -37,16 +37,15 @@ async def get_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
     )
     tokens_today = token_result.scalar() or Decimal("0")
 
-    # Total USD balance all-time (credits are stored negative, abs() for display)
+    # Total USD balance all-time
     usd_wallet = await get_or_create_user_account(db, user_id, AccountCode.USER_USD_WALLET)
     usd_result = await db.execute(
         select(func.coalesce(func.sum(UsdLedgerEntry.amount), Decimal("0")))
         .where(
             UsdLedgerEntry.account_id == usd_wallet.id,
-            UsdLedgerEntry.entry_type == EntryType.CREDIT,
         )
     )
-    usd_balance = abs(usd_result.scalar() or Decimal("0"))
+    usd_balance = usd_result.scalar() or Decimal("0")
 
     return {
         "user_id":                user_id,

@@ -13,8 +13,8 @@ WHAT IT DOES (runs at top of every hour):
        DEBIT   TOKEN_ISSUANCE     +tokens      (system liability reduced)
 
      Pair B — USD conversion:
-       DEBIT   CONVERSION_POOL    +gross_usd   (USD leaves pool)
-       CREDIT  USER_USD_WALLET    -gross_usd   (user receives USD)
+       CREDIT  CONVERSION_POOL    -gross_usd   (USD leaves pool)
+       DEBIT   USER_USD_WALLET    +gross_usd   (user receives USD)
 
      Pair C — Fee (Dreamland pays, NOT the user):
        DEBIT   DREAMLAND_FEE_EXP  +fee_usd
@@ -270,8 +270,8 @@ async def _convert_user_batch(
     db.add(UsdLedgerEntry(
         transaction_id              = usd_txn_id,
         account_id                  = conversion_pool.id,
-        entry_type                  = EntryType.DEBIT,
-        amount                      = gross_usd,          # positive
+        entry_type                  = EntryType.CREDIT,
+        amount                      = -gross_usd,         # negative (USD leaves pool)
         description                 = (
             f"Token→USD: {total_tokens} DREAM "
             f"@ ${settings.DREAM_TOKEN_RATE_USD}/token"
@@ -282,8 +282,8 @@ async def _convert_user_batch(
     db.add(UsdLedgerEntry(
         transaction_id              = usd_txn_id,
         account_id                  = usd_wallet.id,
-        entry_type                  = EntryType.CREDIT,
-        amount                      = -gross_usd,         # negative (mirror)
+        entry_type                  = EntryType.DEBIT,
+        amount                      = gross_usd,          # positive (user receives USD)
         description                 = f"USD credited: {total_tokens} tokens converted",
         source_token_transaction_id = entries[0].transaction_id,
         conversion_job_id           = job_id,

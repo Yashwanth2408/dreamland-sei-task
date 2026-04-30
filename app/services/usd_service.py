@@ -22,8 +22,8 @@ async def get_usd_history(
     Returns USD conversion history UP TO (not including) today.
     'Till the previous day' = converted_at < start of user's current local day.
 
-    We show credits to the user's USD wallet (stored as negative amounts)
-    and return them as positive values for readability.
+    We show debits to the user's USD wallet (stored as positive amounts)
+    which represent the USD they received.
     """
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
@@ -37,26 +37,26 @@ async def get_usd_history(
         db, user_id, AccountCode.USER_USD_WALLET
     )
 
-    # Credits to user's USD wallet — these represent money the user received
-    # Stored as negative amounts; we abs() them for the API response
+    # Debits to user's USD wallet — these represent money the user received
+    # Stored as positive amounts
     result = await db.execute(
         select(UsdLedgerEntry)
         .where(
             UsdLedgerEntry.account_id == usd_wallet.id,
-            UsdLedgerEntry.entry_type == EntryType.CREDIT,
+            UsdLedgerEntry.entry_type == EntryType.DEBIT,
             UsdLedgerEntry.converted_at < day_start,
         )
         .order_by(UsdLedgerEntry.converted_at)
     )
     entries = result.scalars().all()
-    total   = sum(abs(e.amount) for e in entries) if entries else Decimal("0")
+    total   = sum(e.amount for e in entries) if entries else Decimal("0")
 
     return {
         "user_id": user_id,
         "entries": [
             {
                 "transaction_id": e.transaction_id,
-                "amount_usd":     abs(e.amount),
+                "amount_usd":     e.amount,
                 "converted_at":   e.converted_at,
                 "source_tokens":  None,
             }
