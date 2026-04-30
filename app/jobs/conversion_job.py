@@ -86,7 +86,7 @@ async def run_conversion_job() -> None:
     logger.info("conversion_job.begin", target_hour=target_hour.isoformat())
 
     async with AsyncSessionLocal() as db:
-        # ── Claim the job (idempotent upsert) ────────────────────────────────
+        # ── Claim the job (idempotent upsert)
         # Only claim if status is not COMPLETED
         stmt = (
             pg_insert(ConversionJob)
@@ -123,7 +123,7 @@ async def run_conversion_job() -> None:
         job_id = row[0]
 
         try:
-            # ── Fetch unconverted DEBIT entries for this hour ─────────────────
+            # Fetch unconverted DEBIT entries for this hour
             entries_result = await db.execute(
                 select(TokenLedgerEntry)
                 .where(
@@ -142,12 +142,12 @@ async def run_conversion_job() -> None:
                 await _mark_completed(db, job_id, 0, Decimal("0"), Decimal("0"))
                 return
 
-            # ── Group entries by user wallet account ──────────────────────────
+            # Group entries by user wallet account 
             by_account: dict[uuid.UUID, list[TokenLedgerEntry]] = defaultdict(list)
             for entry in token_entries:
                 by_account[entry.account_id].append(entry)
 
-            # ── Pre-fetch system accounts (once per job) ──────────────────────
+            # Pre-fetch system accounts (once per job)
             conversion_pool = await get_or_create_system_account(db, AccountCode.CONVERSION_POOL)
             fee_payable     = await get_or_create_system_account(db, AccountCode.FEE_PAYABLE)
             fee_expense     = await get_or_create_system_account(db, AccountCode.DREAMLAND_FEE_EXP)
@@ -157,7 +157,7 @@ async def run_conversion_job() -> None:
             total_fee        = Decimal("0")
             total_processed  = 0
 
-            # ── Process each user's batch independently ───────────────────────
+            #  Process each user's batch independently
             for token_account_id, acct_entries in by_account.items():
                 try:
                     gross, fee = await _convert_user_batch(
@@ -238,7 +238,7 @@ async def _convert_user_batch(
 
     now_utc = datetime.now(timezone.utc)
 
-    # ── Pair A: Token Burn ────────────────────────────────────────────────────
+    # Pair A: Token Burn 
     db.add(TokenLedgerEntry(
         id                = uuid.uuid4(),
         transaction_id    = token_txn_id,
@@ -262,7 +262,7 @@ async def _convert_user_batch(
         won_at            = now_utc,
     ))
 
-    # ── Pair B: USD conversion ────────────────────────────────────────────────
+    # Pair B: USD conversion
     db.add(UsdLedgerEntry(
         transaction_id              = usd_txn_id,
         account_id                  = conversion_pool.id,
@@ -285,7 +285,7 @@ async def _convert_user_batch(
         conversion_job_id           = job_id,
     ))
 
-    # ── Pair B: Fee (Dreamland pays, not the user) ────────────────────────────
+    # Pair B: Fee (Dreamland pays, not the user)
     db.add(UsdLedgerEntry(
         transaction_id    = fee_txn_id,
         account_id        = fee_expense.id,
@@ -303,7 +303,7 @@ async def _convert_user_batch(
         conversion_job_id = job_id,
     ))
 
-    # ── Mark token entries as converted ──────────────────────────────────────
+    # Mark token entries as converted 
     entry_ids = [e.id for e in entries]
     await db.execute(
         update(TokenLedgerEntry)
