@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.accounts import AccountCode
+from app.models.accounts import Account, AccountCode
 from app.models.ledger import TokenLedgerEntry, EntryType, IdempotencyKey
 from app.models.users import User
 from app.schemas.tokens import WinTokenRequest, WinTokenResponse
@@ -70,6 +70,12 @@ async def win_tokens(
     # ── Step 3: Get/create accounts ──────────────────────────────────────────
     token_wallet = await get_or_create_user_account(
         db, payload.user_id, AccountCode.USER_TOKEN_WALLET
+    )
+    # Lock the user's token wallet row to serialize daily cap enforcement
+    await db.execute(
+        select(Account)
+        .where(Account.id == token_wallet.id)
+        .with_for_update()
     )
     token_issuance = await get_or_create_system_account(
         db, AccountCode.TOKEN_ISSUANCE
