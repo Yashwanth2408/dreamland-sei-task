@@ -78,7 +78,7 @@ APScheduler (in-process)
     |
     +-- Runs hourly at HH:00:00 UTC
     +-- Processes all unconverted tokens from the previous hour
-    +-- Converts to USD (writes 4 ledger rows: 2 for conversion, 2 for fees)
+    +-- Converts to USD (writes 6 ledger rows: 2 for token burn, 2 for conversion, 2 for fees)
     +-- Marks token entries as converted
 ```
 
@@ -132,10 +132,20 @@ SUM = 0.00000000 ✓
 ```
 
 **Hourly Conversion (3 tokens → $0.45 USD):**
+
+*Pair 1: Token Burn*
 ```
 transaction_id: txn-def
-DEBIT   CONVERSION_POOL     +0.45000000   (USD leaves pool)
-CREDIT  USER_USD_WALLET     -0.45000000   (user receives USD)
+CREDIT  USER_TOKEN_WALLET   -3.00000000   (user loses tokens)
+DEBIT   TOKEN_ISSUANCE      +3.00000000   (system liability reduced)
+SUM = 0.00000000 ✓
+```
+
+*Pair 2: USD Conversion*
+```
+transaction_id: txn-ghi
+CREDIT  CONVERSION_POOL     -0.45000000   (USD leaves pool)
+DEBIT   USER_USD_WALLET     +0.45000000   (user receives USD)
 SUM = 0.00000000 ✓
 ```
 
@@ -460,15 +470,19 @@ The conversion job runs at minute 0 of every hour via APScheduler's CronTrigger.
    a. gross_usd = SUM(token_amounts) * 0.15000000
    b. fee_usd   = gross_usd * 0.02
 
-   c. Write USD pair:
-      DEBIT   CONVERSION_POOL   +gross_usd
-      CREDIT  USER_USD_WALLET   -gross_usd
+   c. Write Token Burn pair:
+      CREDIT  USER_TOKEN_WALLET  -total_tokens
+      DEBIT   TOKEN_ISSUANCE     +total_tokens
 
-   d. Write fee pair:
+   d. Write USD pair:
+      CREDIT  CONVERSION_POOL    -gross_usd
+      DEBIT   USER_USD_WALLET    +gross_usd
+
+   e. Write fee pair:
       DEBIT   DREAMLAND_FEE_EXP  +fee_usd
       CREDIT  FEE_PAYABLE        -fee_usd
 
-   e. UPDATE token_ledger SET is_converted = TRUE
+   f. UPDATE token_ledger SET is_converted = TRUE
       WHERE id IN (batch_ids)
 
 6. UPDATE conversion_jobs SET status = COMPLETED
