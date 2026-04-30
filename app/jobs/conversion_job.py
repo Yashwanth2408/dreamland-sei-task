@@ -151,6 +151,7 @@ async def run_conversion_job() -> None:
             conversion_pool = await get_or_create_system_account(db, AccountCode.CONVERSION_POOL)
             fee_payable     = await get_or_create_system_account(db, AccountCode.FEE_PAYABLE)
             fee_expense     = await get_or_create_system_account(db, AccountCode.DREAMLAND_FEE_EXP)
+            token_issuance  = await get_or_create_system_account(db, AccountCode.TOKEN_ISSUANCE)
 
             total_usd        = Decimal("0")
             total_fee        = Decimal("0")
@@ -161,7 +162,7 @@ async def run_conversion_job() -> None:
                 try:
                     gross, fee = await _convert_user_batch(
                         db, job_id, token_account_id, acct_entries,
-                        conversion_pool, fee_payable, fee_expense,
+                        conversion_pool, fee_payable, fee_expense, token_issuance
                     )
                     total_usd       += gross
                     total_fee       += fee
@@ -205,6 +206,7 @@ async def _convert_user_batch(
     conversion_pool,
     fee_payable,
     fee_expense,
+    token_issuance,
 ) -> tuple[Decimal, Decimal]:
     """
     Convert one user's token batch to USD.
@@ -232,8 +234,35 @@ async def _convert_user_batch(
 
     usd_txn_id = uuid.uuid4()
     fee_txn_id = uuid.uuid4()
+    token_txn_id = uuid.uuid4()
 
-    # ── Pair A: USD conversion ────────────────────────────────────────────────
+    now_utc = datetime.now(timezone.utc)
+
+    # ── Pair A: Token Burn ────────────────────────────────────────────────────
+    db.add(TokenLedgerEntry(
+        id                = uuid.uuid4(),
+        transaction_id    = token_txn_id,
+        account_id        = token_account_id,
+        entry_type        = EntryType.CREDIT,
+        amount            = -total_tokens,          # negative
+        description       = f"Tokens converted to USD: {total_tokens} DREAM",
+        is_converted      = True,
+        conversion_job_id = job_id,
+        won_at            = now_utc,
+    ))
+    db.add(TokenLedgerEntry(
+        id                = uuid.uuid4(),
+        transaction_id    = token_txn_id,
+        account_id        = token_issuance.id,
+        entry_type        = EntryType.DEBIT,
+        amount            = total_tokens,           # positive
+        description       = f"Tokens converted to USD: {total_tokens} DREAM",
+        is_converted      = True,
+        conversion_job_id = job_id,
+        won_at            = now_utc,
+    ))
+
+    # ── Pair B: USD conversion ────────────────────────────────────────────────
     db.add(UsdLedgerEntry(
         transaction_id              = usd_txn_id,
         account_id                  = conversion_pool.id,
