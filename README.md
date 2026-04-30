@@ -10,8 +10,8 @@ This implementation demonstrates production-grade financial backend design: idem
 
 ---
 
-![Operator Console](demo/operator-dashboard.svg)
-![Owner Console](demo/owner-dashboard.svg)
+![Operator Console](demo/operator.png)
+![Owner Console](demo/owner.png)
 
 ## Table of Contents
 
